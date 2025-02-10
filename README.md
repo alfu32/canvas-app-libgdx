@@ -31,3 +31,18 @@ Useful Gradle tasks and flags:
 
 Note that most tasks that are not specific to a single project can be run with `name:` prefix, where the `name` should be replaced with the ID of a specific project.
 For example, `core:clean` removes `build` folder only from the `core` project.
+
+
+## Compile and Run
+
+at the command prompt at the root of the project do :
+
+compile
+```bash
+./gradlew jar
+```
+
+and run
+```bash
+java -jar lwjgl3/build/libs/WorkerML-1.0.0.jar
+```
