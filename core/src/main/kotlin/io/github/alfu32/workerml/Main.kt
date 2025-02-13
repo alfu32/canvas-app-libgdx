@@ -3,8 +3,6 @@ package io.github.alfu32.workerml
 import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.GL20
-import com.badlogic.gdx.graphics.Pixmap
-import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.Batch
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.scenes.scene2d.Actor
@@ -13,6 +11,8 @@ import com.badlogic.gdx.scenes.scene2d.InputListener
 import com.badlogic.gdx.scenes.scene2d.Stage
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer
+import com.badlogic.gdx.math.Vector2
 import com.badlogic.gdx.utils.Json
 import com.badlogic.gdx.utils.viewport.ScreenViewport
 import com.kotcrab.vis.ui.VisUI
@@ -21,77 +21,7 @@ import com.kotcrab.vis.ui.widget.VisTextButton
 import ktx.app.KtxGame
 import ktx.app.KtxScreen
 import ktx.async.KtxAsync
-
-// A simple asset holder to create a 1x1 white pixel texture.
-object Assets {
-    val whitePixel: Texture by lazy {
-        val pixmap = Pixmap(1, 1, Pixmap.Format.RGBA8888)
-        pixmap.setColor(Color.WHITE)
-        pixmap.fill()
-        val texture = Texture(pixmap)
-        pixmap.dispose()
-        texture
-    }
-}
-
-// --- Accessory classes ---
-data class Point(val x: Float, val y: Float){
-    public fun add(dx:Float, dy:Float):Point{
-        return Point(x+dx,y+dy)
-    }
-}
-data class Box(val minX: Float, val minY: Float, var maxX: Float, var maxY: Float) {
-    val width: Float get() = maxX - minX
-    val height: Float get() = maxY - minY
-    fun contains(point: Point): Boolean = point.x in minX..maxX && point.y in minY..maxY
-    fun intersects(other: Box): Boolean =
-        !(other.minX > maxX || other.maxX < minX || other.minY > maxY || other.maxY < minY)
-}
-
-// --- Drawable interface and Model ---
-interface Drawable {
-    fun draw(model: Model, canvas: CanvasComponent, batch: Batch)
-    fun getBoundingBox(): Box
-}
-
-class Model : Drawable {
-    private val drawables = mutableListOf<Drawable>()
-    fun addDrawable(drawable: Drawable) { drawables.add(drawable) }
-    fun removeDrawable(drawable: Drawable) { drawables.remove(drawable) }
-    fun getDrawablesUnderPoint(point: Point): List<Drawable> = drawables.filter { it.getBoundingBox().contains(point) }
-    override fun draw(model: Model, canvas: CanvasComponent, batch: Batch) {
-        for (drawable in drawables) {
-            if (drawable.getBoundingBox().intersects(canvas.viewport)) {
-                drawable.draw(this, canvas, batch)
-            }
-        }
-    }
-    override fun getBoundingBox(): Box {
-        if (drawables.isEmpty()) return Box(0f, 0f, 0f, 0f)
-        var minX = Float.MAX_VALUE
-        var minY = Float.MAX_VALUE
-        var maxX = -Float.MAX_VALUE
-        var maxY = -Float.MAX_VALUE
-        for (drawable in drawables) {
-            val box = drawable.getBoundingBox()
-            if (box.minX < minX) minX = box.minX
-            if (box.minY < minY) minY = box.minY
-            if (box.maxX > maxX) maxX = box.maxX
-            if (box.maxY > maxY) maxY = box.maxY
-        }
-        return Box(minX, minY, maxX, maxY)
-    }
-}
-
-// --- Canvas Component ---
-data class CanvasEvent(
-    val drawablesUnderPointer: List<Drawable>,
-    val viewport: Box,
-    val screenPoint: Point,
-    val modelPoint: Point,
-    val type: String
-) {
-}
+import kotlin.math.atan2
 
 class CanvasComponent(val model: Model) : Actor() {
 
@@ -160,7 +90,7 @@ class CanvasComponent(val model: Model) : Actor() {
         return Point(modelX, modelY)
     }
 
-    override fun draw(batch: Batch?, parentAlpha: Float) {
+    fun draw(batch: Batch?, parentAlpha: Float,shapeRenderer:ShapeRenderer) {
         batch?.let { b ->
             // Draw a dark gray background so the canvas is visible.
             b.color = Color.DARK_GRAY
@@ -168,6 +98,11 @@ class CanvasComponent(val model: Model) : Actor() {
             b.color = Color.WHITE
             super.draw(b, parentAlpha)
             model.draw(model, this, b)
+        }
+    }
+    fun draw(shapeRenderer:ShapeRenderer?, parentAlpha: Float) {
+        shapeRenderer?.let { b ->
+            model.draw(model, this, shapeRenderer)
         }
     }
 
@@ -184,49 +119,16 @@ class CanvasComponent(val model: Model) : Actor() {
     }
 }
 
-// --- Box and Link Drawables with metadata ---
-data class BoxMetadata(val name: String, val textContent: String)
-
-class BoxDrawable(var position: Point, val size: Float = 50f, val metadata: BoxMetadata) : Drawable {
-    override fun getBoundingBox() = Box(position.x, position.y, position.x + size, position.y + size)
-    override fun draw(model: Model, canvas: CanvasComponent, batch: Batch) {
-        // Draw a blue rectangle to represent the box.
-        batch.color = Color.BLUE
-        batch.draw(Assets.whitePixel, position.x, position.y, size, size)
-        batch.color = Color.WHITE
-    }
-}
-
-class LinkDrawable(var from: BoxDrawable, var to: BoxDrawable) : Drawable {
-    fun copy():LinkDrawable = LinkDrawable(from,to)
-    override fun getBoundingBox(): Box {
-        val fromBox = from.getBoundingBox()
-        val toBox = to.getBoundingBox()
-        val minX = minOf(fromBox.minX, toBox.minX)
-        val minY = minOf(fromBox.minY, toBox.minY)
-        val maxX = maxOf(fromBox.maxX, toBox.maxX)
-        val maxY = maxOf(fromBox.maxY, toBox.maxY)
-        return Box(minX, minY, maxX, maxY)
-    }
-    override fun draw(model: Model, canvas: CanvasComponent, batch: Batch) {
-        // Draw a red line between the centers of the two boxes.
-        val fromCenter = Point(from.position.x + from.size / 2, from.position.y + from.size / 2)
-        val toCenter = Point(to.position.x + to.size / 2, to.position.y + to.size / 2)
-        batch.color = Color.RED
-        val dx = toCenter.x - fromCenter.x
-        val dy = toCenter.y - fromCenter.y
-        val length = kotlin.math.sqrt(dx * dx + dy * dy)
-        val angle = kotlin.math.atan2(dy, dx) * 57.2958f // radians to degrees
-        // Draw a rotated rectangle (using the white pixel tinted red) to simulate a line.
-        batch.draw(Assets.whitePixel, fromCenter.x, fromCenter.y, 0f, 0.5f, length, 2f, 1f, 1f, angle, 0, 0, 1, 1, false, false)
-        batch.color = Color.WHITE
-    }
+fun calculateAngle(p1: Point, p2: Point): Float {
+    return (atan2((p2.y - p1.y).toDouble(), (p2.x - p1.x).toDouble()) * 180f - Math.PI).toFloat()
 }
 
 // --- LogoScreen that integrates canvas, model, and UI ---
 class CanvasScreen : KtxScreen {
     private val batch = SpriteBatch()
-    private val batch2 = SpriteBatch()
+    private val shapeRenderer = ShapeRenderer().apply {
+        projectionMatrix = batch.projectionMatrix
+    }
     private val stage = Stage(ScreenViewport(), batch)
     private val uiStage = Stage(ScreenViewport(), batch)
 
@@ -236,8 +138,8 @@ class CanvasScreen : KtxScreen {
     // Modes for user actions.
     enum class Mode { IDLE, ADD_BOX, ADD_LINK }
     private var mode: Mode = Mode.IDLE
-    private var linkSource: BoxDrawable = BoxDrawable(Point(0f,0f),5f,BoxMetadata("BoxSource", "Content for box source"))
-    private var linkTarget: BoxDrawable = BoxDrawable(Point(0f,0f),5f,BoxMetadata("BoxTarget", "Content for box target"))
+    private var linkSource: BoxDrawable = BoxDrawable(Point(0f,0f),Point(5f,5f),BoxMetadata("BoxSource", "Content for box source"))
+    private var linkTarget: BoxDrawable = BoxDrawable(Point(0f,0f),Point(5f,5f),BoxMetadata("BoxTarget", "Content for box target"))
     private var link:LinkDrawable = LinkDrawable(linkSource, linkTarget)
     private var linkStep=0
     private var boxCounter = 1
@@ -245,7 +147,7 @@ class CanvasScreen : KtxScreen {
     private lateinit var statusBar:VisLabel
     private lateinit var table:Table
 
-        private fun addStatus(message:Any) {
+    private fun addStatus(message:Any) {
         when(message) {
             is String -> print("$message ")
             else -> print("${message.javaClass.name.split(".").last()}:${json.toJson(message)} ")
@@ -292,7 +194,7 @@ class CanvasScreen : KtxScreen {
                     // Create a new box at the clicked (model) location.
                     val metadata = BoxMetadata("Box $boxCounter", "Content for box $boxCounter")
                     boxCounter++
-                    val newBox = BoxDrawable(event.modelPoint.add(-25f,-25f), 50f, metadata)
+                    val newBox = BoxDrawable(event.modelPoint.add(-25f,-25f), metadata =  metadata)
                     addStatus(event.type)
                     addStatus(event.screenPoint)
                     endStatus(event.modelPoint)
@@ -310,8 +212,15 @@ class CanvasScreen : KtxScreen {
                             linkStep=1
                         } else {
                             link.to=box
-                            model.addDrawable(link.copy())
+                            val cp = link.copy()
+                            // cp.from=link.from
+                            // cp.to=box
+                            model.addDrawable(cp)
+                            cp.from.addLink(cp)
+                            cp.to.addLink(cp)
                             // mode = Mode.IDLE
+                            link.from=linkSource
+                            link.to=linkTarget
                             linkStep=0
                         }
                     }
@@ -371,7 +280,15 @@ class CanvasScreen : KtxScreen {
         uiStage.act(delta)
         stage.draw()
         uiStage.draw()
+
+        shapeRenderer.projectionMatrix = batch.projectionMatrix
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Line)
+        canvas.model.draw(model,canvas,shapeRenderer)
+        link.draw(model,canvas,shapeRenderer)
+        shapeRenderer.end()
+
         batch.begin()
+        canvas.model.draw(model,canvas,batch)
         link.draw(model,canvas,batch)
         batch.end()
     }
