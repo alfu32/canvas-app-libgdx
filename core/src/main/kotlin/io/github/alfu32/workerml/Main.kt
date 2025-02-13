@@ -141,8 +141,9 @@ class CanvasScreen : KtxScreen {
     private var linkSource: BoxDrawable = BoxDrawable(Point(0f,0f),Point(5f,5f),BoxMetadata("BoxSource", "Content for box source"))
     private var linkTarget: BoxDrawable = BoxDrawable(Point(0f,0f),Point(5f,5f),BoxMetadata("BoxTarget", "Content for box target"))
     private var link:LinkDrawable = LinkDrawable(linkSource, linkTarget)
-    private var linkStep=0
     private var boxCounter = 1
+    private var box:BoxDrawable = BoxDrawable(Point(0f,0f), metadata =  BoxMetadata("Box $boxCounter", "Content for box $boxCounter"))
+    private var linkStep=0
     private val json = Json()
     private lateinit var statusBar:VisLabel
     private lateinit var table:Table
@@ -180,6 +181,7 @@ class CanvasScreen : KtxScreen {
             endStatus(event.modelPoint)
             linkSource.position=event.modelPoint
             linkTarget.position=event.modelPoint
+            box.position=event.modelPoint
         }
         // Process canvas pointer events.
         canvas.onZoomFinished = {event ->
@@ -194,7 +196,8 @@ class CanvasScreen : KtxScreen {
                     // Create a new box at the clicked (model) location.
                     val metadata = BoxMetadata("Box $boxCounter", "Content for box $boxCounter")
                     boxCounter++
-                    val newBox = BoxDrawable(event.modelPoint.add(-25f,-25f), metadata =  metadata)
+                    val newBox = BoxDrawable(event.modelPoint, metadata =  metadata)
+                    box.metadata = BoxMetadata("Box $boxCounter", "Content for box $boxCounter")
                     addStatus(event.type)
                     addStatus(event.screenPoint)
                     endStatus(event.modelPoint)
@@ -284,12 +287,22 @@ class CanvasScreen : KtxScreen {
         shapeRenderer.projectionMatrix = batch.projectionMatrix
         shapeRenderer.begin(ShapeRenderer.ShapeType.Line)
         canvas.model.draw(model,canvas,shapeRenderer)
-        link.draw(model,canvas,shapeRenderer)
+        if(mode == Mode.ADD_LINK ) {
+            link.draw(model,canvas,shapeRenderer)
+        }
+        if(mode == Mode.ADD_BOX ) {
+            box.draw(model, canvas, shapeRenderer)
+        }
         shapeRenderer.end()
 
         batch.begin()
         canvas.model.draw(model,canvas,batch)
-        link.draw(model,canvas,batch)
+        if(mode == Mode.ADD_LINK ) {
+            link.draw(model,canvas,batch)
+        }
+        if(mode == Mode.ADD_BOX ) {
+            box.draw(model,canvas,batch)
+        }
         batch.end()
     }
 
